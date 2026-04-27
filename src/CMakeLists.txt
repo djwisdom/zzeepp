@@ -1,4 +1,3 @@
-
 SET(ZEP_ROOT ${CMAKE_CURRENT_LIST_DIR}/..)
 
 SET(ZEP_SOURCE
@@ -17,7 +16,6 @@ ${ZEP_ROOT}/include/zep/mcommon/file/cpptoml.h
 ${ZEP_ROOT}/include/zep/mcommon/file/path.h
 ${ZEP_ROOT}/include/zep/mcommon/logger.h
 ${ZEP_ROOT}/include/zep/mcommon/string/stringutils.h
-${ZEP_ROOT}/include/zep/mcommon/threadutils.h
 ${ZEP_ROOT}/include/zep/mode.h
 ${ZEP_ROOT}/include/zep/mode_search.h
 ${ZEP_ROOT}/include/zep/mode_standard.h
@@ -76,6 +74,9 @@ LIST(APPEND SRC_INCLUDE ${ZEP_ROOT}/src ${ZEP_ROOT}/src/mcommon)
 add_library(Zep STATIC ${SOURCES})
 add_library(Zep::Zep ALIAS Zep)
 
+# Use modern CMake target_compile_features instead of set_property
+target_compile_features(Zep PRIVATE cxx_std_20)
+
 target_include_directories(Zep 
     PRIVATE
         ${ZEP_ROOT}/src/mcommon
@@ -87,7 +88,7 @@ target_include_directories(Zep
         $<INSTALL_INTERFACE:include>
     ) 
 
-if (TARGET_LINUX)
+if (UNIX AND NOT APPLE)
 target_link_libraries(Zep
 	PUBLIC
 	stdc++fs
@@ -112,7 +113,7 @@ install(TARGETS Zep
 
 # Workaround for if this file is included as part of another project 
 if (NOT DEFINED CMAKE_INSTALL_INCLUDEDIR)
-set (CMAKE_INSTALL_INCLUDEDIR ${ZEP_ROOT}/bin/zep)
+set (CMAKE_INSTALL_INCLUDEDIR include)
 endif()
 
 # Install the include files
@@ -126,4 +127,3 @@ source_group (Zep\\common REGULAR_EXPRESSION "src/mcommon/.*")
 source_group (Zep\\common REGULAR_EXPRESSION "include/zep/mcommon/.*")
 source_group (Zep REGULAR_EXPRESSION "src/.*")
 source_group (Zep\\include REGULAR_EXPRESSION "include/zep/.*")
-
