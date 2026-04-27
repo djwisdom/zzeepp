@@ -1,12 +1,12 @@
-# Tests cannot be build without the ImGui parts
+# Tests can be built without ImGui parts (using null display)
 
 SET(TEST_ROOT ${CMAKE_CURRENT_LIST_DIR})
-if (BUILD_TESTS AND BUILD_IMGUI)
+if (BUILD_TESTS)
 
 project(unittests)
 
 # Evil glob
-file(GLOB_RECURSE FOUND_TEST_SOURCES "${ZEP_ROOT}/src/*.test.cpp")
+file(GLOB_RECURSE FOUND_TEST_SOURCES "${ZEP_ROOT}/src/*.test.cpp" "${ZEP_ROOT}/src/tests/*.test.cpp")
 
 list(APPEND TEST_SOURCES
     ${FOUND_TEST_SOURCES}

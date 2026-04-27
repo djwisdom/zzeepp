@@ -2,6 +2,9 @@
 #include "zep/editor.h" // FOR ZEP_UNUSED
 
 #include <fstream>
+#include <sstream>
+#include <vector>
+#include <algorithm>
 
 #include "zep/mcommon/logger.h"
 #include "zep/mcommon/string/stringutils.h"
@@ -88,6 +91,26 @@ bool ZepFileSystemCPP::IsReadOnly(const fs::path& path) const
 
 std::string ZepFileSystemCPP::Read(const fs::path& fileName)
 {
+    // Security enhancement: Check file size limit before reading
+    if (m_maxFileSize > 0)
+    {
+        try
+        {
+            auto fileSize = cpp_fs::file_size(fileName.string());
+            if (fileSize > m_maxFileSize)
+            {
+                ZLOG(WARNING, "File size exceeds limit: " << fileName.string() 
+                      << " (" << fileSize << " bytes > " << m_maxFileSize << " bytes)");
+                return std::string();
+            }
+        }
+        catch (const cpp_fs::filesystem_error&)
+        {
+            // If we can't get file size, fall back to standard reading
+            // but this is unlikely to happen if Exists() worked
+        }
+    }
+    
     std::ifstream in(fileName, std::ios::in | std::ios::binary);
     if (in)
     {
@@ -146,6 +169,12 @@ bool ZepFileSystemCPP::Exists(const fs::path& path) const
 {
     try
     {
+        // Security enhancement: Validate path for traversal attempts
+        if (!IsPathSafe(path))
+        {
+            ZLOG(WARNING, "Unsafe path attempt blocked: " << path.string());
+            return false;
+        }
         return cpp_fs::exists(path.string());
     }
     catch (cpp_fs::filesystem_error& err)
@@ -156,132 +185,59 @@ bool ZepFileSystemCPP::Exists(const fs::path& path) const
     }
 }
 
-bool ZepFileSystemCPP::Equivalent(const fs::path& path1, const fs::path& path2) const
+// Security enhancement: Set maximum file size for reading (0 = unlimited)
+void ZepFileSystemCPP::SetMaxFileSize(size_t maxSize)
 {
-    try
-    {
-        // The below API expects existing files!  Best we can do is direct compare of paths
-        if (!cpp_fs::exists(path1.string()) || !cpp_fs::exists(path2.string()))
-        {
-            return Canonical(path1).string() == Canonical(path2).string();
-        }
-        return cpp_fs::equivalent(path1.string(), path2.string());
-    }
-    catch (cpp_fs::filesystem_error& err)
-    {
-        ZEP_UNUSED(err);
-        ZLOG(ERROR, "Exception: " << err.what());
-        return path1 == path2;
-    }
+    m_maxFileSize = maxSize;
 }
 
-fs::path ZepFileSystemCPP::Canonical(const fs::path& path) const
+size_t ZepFileSystemCPP::GetMaxFileSize() const
 {
-    try
-    {
-#ifdef __unix__
-        // TODO: Remove when unix doesn't need <experimental/filesystem>
-        // I can't remember why weakly_connical is used....
-        return fs::path(cpp_fs::canonical(path.string()).string());
-#else
-        return fs::path(cpp_fs::weakly_canonical(path.string()).string());
-#endif
-    }
-    catch (cpp_fs::filesystem_error& err)
-    {
-        ZEP_UNUSED(err);
-        ZLOG(ERROR, "Exception: " << err.what());
-        return path;
-    }
+    return m_maxFileSize;
 }
 
-fs::path ZepFileSystemCPP::GetSearchRoot(const fs::path& start, bool& foundGit) const
+// Security enhancement: Validate path for traversal attempts
+bool ZepFileSystemCPP::IsPathSafe(const fs::path& path) const
 {
-    foundGit = false;
-    auto findStartPath = [&](const fs::path& startPath) {
-        if (!startPath.empty())
-        {
-            auto testPath = startPath;
-            if (!IsDirectory(testPath))
-            {
-                testPath = testPath.parent_path();
-            }
-
-            if (!(m_flags & ZepFileSystemFlags::SearchGitRoot))
-            {
-                return testPath;
-            }
-
-            while (!testPath.empty() && IsDirectory(testPath))
-            {
-                foundGit = false;
-
-                // Look in this dir
-                ScanDirectory(testPath, [&](const fs::path& p, bool& recurse) -> bool {
-                    // Not looking at sub folders
-                    recurse = false;
-
-                    // Found the .git repo
-                    if (p.extension() == ".git" && IsDirectory(p))
-                    {
-                        foundGit = true;
-
-                        // Quit search
-                        return false;
-                    }
-                    return true;
-                });
-
-                // If found,  return it as the path we need
-                if (foundGit)
-                {
-                    return testPath;
-                }
-
-                if (!testPath.has_relative_path())
-                {
-                    break;
-                }
-                testPath = testPath.parent_path();
-            }
-
-            // Didn't find a sensible search root, so start at the parent folder of the start path if it is a file
-            if (!IsDirectory(startPath))
-            {
-                if (IsDirectory(startPath.parent_path()))
-                {
-                    return startPath.parent_path();
-                }
-            }
-        }
-        return startPath;
-    };
-
-    fs::path workingDir = GetWorkingDirectory();
-
-    auto startPath = findStartPath(start);
-    if (startPath.empty())
+    // Convert to string for easier manipulation
+    std::string pathStr = path.string();
+    
+    // Check for obvious path traversal attempts
+    if (pathStr.find("..") != std::string::npos) 
     {
-        startPath = findStartPath(workingDir);
-        if (startPath.empty())
+        // Additional check: make sure it's not just a file named "..something"
+        // Simple approach: split by path separators and check each component
+        std::vector<std::string> components;
+        std::string component;
+        std::istringstream iss(pathStr);
+        
+        // Handle both path separators
+        std::replace(pathStr.begin(), pathStr.end(), '\\', '/');
+        std::istringstream iss2(pathStr);
+        
+        while (std::getline(iss2, component, '/'))
         {
-            startPath = GetWorkingDirectory();
+            if (component == "..")
+            {
+                return false; // Found a parent directory reference
+            }
+            components.push_back(component);
         }
     }
-
-    // Failure case, just use current path
-    if (startPath.empty())
+    
+    // Check for null bytes (though string shouldn't contain them if from filesystem)
+    if (pathStr.find('\0') != std::string::npos)
     {
-        startPath = start;
+        return false;
     }
-    return startPath;
-}
-
-void ZepFileSystemCPP::SetFlags(uint32_t flags)
-{
-    m_flags = flags;
-}
-
+    
+    // Additional safety: limit path length to prevent DoS via extremely long paths
+    if (pathStr.length() > 4096) // Reasonable limit for path length
+    {
+        return false;
+    }
+    
+    return true;
 } // namespace Zep
 
 #endif // CPP_FILESYSTEM

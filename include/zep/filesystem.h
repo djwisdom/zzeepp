@@ -80,10 +80,20 @@ public:
     virtual fs::path Canonical(const fs::path& path) const override;
     virtual void SetFlags(uint32_t flags) override;
 
+    // Security enhancement: Set maximum file size for reading (0 = unlimited)
+    void SetMaxFileSize(size_t maxSize);
+    size_t GetMaxFileSize() const;
+
+    // Security enhancement: Validate path for traversal attempts (public for testing)
+    bool IsPathSafe(const fs::path& path) const;
+
 private:
     fs::path m_workingDirectory;
     fs::path m_configPath;
     uint32_t m_flags = ZepFileSystemFlags::SearchGitRoot;
+    
+    // Security enhancement: Maximum file size for reading (in bytes)
+    size_t m_maxFileSize = 0; // 0 = unlimited
 };
 #endif // CPP File system
 
